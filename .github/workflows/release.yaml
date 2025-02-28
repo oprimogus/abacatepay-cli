@@ -16,16 +16,19 @@ jobs:
     outputs:
       version: ${{ steps.get-version.outputs.version }}
     steps:
+      - name: Debug PR Event
+        run: cat $GITHUB_EVENT_PATH
+
       - name: Get PR Labels
         id: get-version
         run: |
-          VERSION=$(jq -r '.pull_request.labels[].name' $GITHUB_EVENT_PATH | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || echo "")
-          if [ -z "$VERSION" ]; then
-            echo "❌ Nenhuma versão válida encontrada! Adicione uma label no formato vX.Y.Z no PR."
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "::set-output name=version::$VERSION"
+            VERSION=$(jq -r '.pull_request.labels[].name' "$GITHUB_EVENT_PATH" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || echo "")
+            if [ -z "$VERSION" ]; then
+              echo "❌ No valid version label found! Add a label in the format vX.Y.Z to the PR."
+              exit 1
+            fi
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            echo "Version detected: $VERSION"
 
   build:
     needs: check-version
