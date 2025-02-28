@@ -1,51 +1,71 @@
 name: Build and Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+    steps:
+      - name: Get PR Labels
+        id: get-version
+        run: |
+          VERSION=$(jq -r '.pull_request.labels[].name' $GITHUB_EVENT_PATH | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || echo "")
+          if [ -z "$VERSION" ]; then
+            echo "❌ Nenhuma versão válida encontrada! Adicione uma label no formato vX.Y.Z no PR."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "::set-output name=version::$VERSION"
+
   build:
+    needs: check-version
     name: Build Binaries
     runs-on: ubuntu-latest
     strategy:
       matrix:
         goos: [linux, windows, darwin]
         goarch: [amd64, arm64]
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: stable
-      
+
       - name: Build Binary
         run: |
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}
-      
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}
-  
+
   release:
-    name: Create GitHub Release
     needs: build
+    name: Create GitHub Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      
+
       - name: Download Artifacts
         uses: actions/download-artifact@v4
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -62,4 +82,6 @@ jobs:
 3. Grant execution permission with `chmod +x /usr/local/bin/abacatepay-cli`
 4. Run with `abacatepay-cli`
 \n## Usage\nRun `abacatepay-cli --help` to see available commands."
-          tag_name: ${{ github.ref }}
+          tag_name: ${{ needs.check-version.outputs.version }}
+          release_name: "Release ${{ needs.check-version.outputs.version }}"
+          token: ${{ secrets.GITHUB_TOKEN }}
