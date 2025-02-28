@@ -13,22 +13,37 @@ permissions:
 jobs:
   check-version:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
     outputs:
       version: ${{ steps.get-version.outputs.version }}
     steps:
-      - name: Debug PR Event
-        run: cat $GITHUB_EVENT_PATH
-
-      - name: Get PR Labels
+      - name: Extract version from PR title or body
         id: get-version
         run: |
-            VERSION=$(jq -r '.pull_request.labels[].name' "$GITHUB_EVENT_PATH" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || echo "")
-            if [ -z "$VERSION" ]; then
-              echo "❌ No valid version label found! Add a label in the format vX.Y.Z to the PR."
-              exit 1
-            fi
-            echo "VERSION=$VERSION" >> $GITHUB_ENV
-            echo "Version detected: $VERSION"
+          # Extrai o título e o corpo do PR
+          PR_TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")
+          PR_BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
+          
+          # Procura pela versão no título primeiro (formato vX.Y.Z ou v.X.Y.Z)
+          VERSION=$(echo "$PR_TITLE" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+          
+          # Se não encontrou no título, procura no corpo do PR
+          if [ -z "$VERSION" ]; then
+            VERSION=$(echo "$PR_BODY" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+          fi
+          
+          # Verifica se encontrou a versão
+          if [ -z "$VERSION" ]; then
+            echo "❌ Não foi encontrada uma versão válida no título ou corpo do PR. Adicione a versão no formato vX.Y.Z."
+            exit 1
+          fi
+          
+          # Remove o 'v' inicial se necessário para outras operações
+          VERSION_NUM=${VERSION#v}
+          
+          # Output da versão para uso em outras etapas
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "::notice::Versão detectada: $VERSION"
 
   build:
     needs: check-version
@@ -50,16 +65,16 @@ jobs:
 
       - name: Build Binary
         run: |
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}
+          path: abacatepay-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}
 
   release:
-    needs: build
+    needs: [check-version, build]
     name: Create GitHub Release
     runs-on: ubuntu-latest
     steps:
